@@ -95,12 +95,15 @@ function saveKey(k){try{localStorage.setItem(AK,k)}catch{}}
 
 function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);})}
 
-async function callGemini(apiKey,systemPrompt,messages,useProModel){
-  const model=useProModel?PRO_MODEL:FLASH_MODEL;
-  const contents=messages.map(m=>{
-    if(m.role==="assistant") return{role:"model",parts:[{text:m.content||""}]};
-    const parts=[];
-    (m.files||[]).forEach(f=>{parts.push({inline_data:{mime_type:f.mediaType,data:f.data}});});
+    (m.files||[]).forEach(f=>{
+      if(f.kind==="image"){
+        parts.push({inline_data:{mime_type:f.mediaType,data:f.data}});
+      } else if(f.kind==="pdf"&&f.fileUri){
+        parts.push({file_data:{mime_type:"application/pdf",file_uri:f.fileUri}});
+      } else if(f.kind==="pdf"&&f.data){
+        parts.push({inline_data:{mime_type:"application/pdf",data:f.data}});
+      }
+    });
     if(m.content) parts.push({text:m.content});
     if(parts.length===0) parts.push({text:"(no content)"});
     return{role:"user",parts};
@@ -153,13 +156,24 @@ function App(){
     setConversations(prev=>{const u={...prev,[agentId]:[...(prev[agentId]||[]),...newMsgs]};saveData({conversations:u,sharedCtx});return u;});
   }
 
-  async function handleFiles(e){
+async function handleFiles(e){
     const files=Array.from(e.target.files);const out=[];
     for(const f of files){
       const isImg=f.type.startsWith("image/"),isPdf=f.type==="application/pdf";
-      if(!isImg&&!isPdf) continue;if(f.size>10*1024*1024) continue;
+      if(!isImg&&!isPdf) continue;if(f.size>20*1024*1024) continue;
       const data=await fileToBase64(f);
-      out.push({name:f.name,kind:isImg?"image":"pdf",mediaType:f.type,data,preview:isImg?`data:${f.type};base64,${data}`:null});
+      let fileUri=null;
+      if(isPdf&&apiKey){
+        try{
+          const uploadRes=await fetch(
+            `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+            {method:"POST",headers:{"Content-Type":"application/pdf","X-Goog-Upload-Protocol":"raw","X-Goog-Upload-Command":"upload, finalize","X-Goog-Upload-Header-Content-Length":f.size,"X-Goog-Upload-Header-Content-Type":"application/pdf"},body:await f.arrayBuffer()}
+          );
+          const uploadData=await uploadRes.json();
+          fileUri=uploadData?.file?.uri||null;
+        }catch(err){console.warn("PDF upload failed, using inline",err);}
+      }
+      out.push({name:f.name,kind:isImg?"image":"pdf",mediaType:f.type,data:isImg?data:null,fileUri,preview:isImg?`data:${f.type};base64,${data}`:null});
     }
     setPending(prev=>[...prev,...out]);e.target.value="";
   }
