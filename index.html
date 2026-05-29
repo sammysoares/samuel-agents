@@ -95,7 +95,13 @@ function saveKey(k){try{localStorage.setItem(AK,k)}catch{}}
 
 function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(file);})}
 
+async function callGemini(apiKey,systemPrompt,messages,useProModel){
+  const model=useProModel?PRO_MODEL:FLASH_MODEL;
+  const contents=messages.map(m=>{
+    if(m.role==="assistant") return{role:"model",parts:[{text:m.content||""}]};
+    const parts=[];
     (m.files||[]).forEach(f=>{
+      
       if(f.kind==="image"){
         parts.push({inline_data:{mime_type:f.mediaType,data:f.data}});
       } else if(f.kind==="pdf"&&f.fileUri){
